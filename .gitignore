@@ -1,0 +1,3 @@
+# Your personal API key lives here — never commit it
+config.js
+.DS_Store
