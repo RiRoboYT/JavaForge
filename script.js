@@ -11,8 +11,10 @@
    ========================================================================== */
 
 /* ---------- 1. Config & constants ---------- */
-const API_URL = "https://api.onlinecompiler.io/api/run-code-sync/";
-const COMPILER_ID = "openjdk-25";
+// The page never talks to OnlineCompiler.io directly (the API blocks browsers).
+// It sends code to run.php on the same site (Hostinger) or to the local server
+// started by start.bat, which forward it and add the API key.
+const RUN_ENDPOINT = "run.php";
 const MONACO_BASE = "https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min";
 const RUN_TIMEOUT_MS = 60000;
 
@@ -26,7 +28,6 @@ const DEFAULT_SETTINGS = {
   theme: "one-dark",
   lastDarkTheme: "one-dark",
   lastLightTheme: "clean-light",
-  apiKey: "",
   fontSize: 14,
   wordWrap: false,
   minimap: true,
@@ -901,10 +902,68 @@ if (typeof document !== "undefined") {
     const saveSettings = () => Store.write(STORAGE_KEYS.settings, settings);
     const getProgram = (id) => programs.find((p) => p.id === id);
 
-    function apiKey() {
-      let cfg = (window.JAVAFORGE_CONFIG && window.JAVAFORGE_CONFIG.apiKey) || "";
-      if (/PASTE-YOUR/i.test(cfg)) cfg = ""; // untouched config.example.js
-      return (settings.apiKey || cfg || "").trim();
+    /* ---------- Connection to run.php / local server ---------- */
+    const IS_FILE = location.protocol === "file:";
+    let conn = { state: IS_FILE ? "file" : "checking", server: "" };
+    const CONN_TEXT = {
+      checking: ["Checking connection…", "", ""],
+      ok: ["Connected", "", ""],
+      file: [
+        "Not connected",
+        "JavaForge was opened as a file",
+        "Browsers won't let a page opened straight from your disk run code. Double-click start.bat in the JavaForge folder (it opens JavaForge at http://localhost:8000), or use your website. Programs saved here stay in this copy: click Export first, then Import them in the new window.",
+      ],
+      missing: ["Not connected", "run.php wasn't found", "Upload run.php and secret.php into the same folder as index.html on your website, then click Check again."],
+      nophp: ["Not connected", "PHP isn't running on this host", "run.php was sent back as plain text instead of being run. Use a hosting plan with PHP (e.g. Hostinger Web Hosting, not Website Builder)."],
+      nokey: ["No API key", "The server has no API key", "Open secret.php, paste your OnlineCompiler.io API key between the quotes, save it (re-upload it on your website), then click Check again."],
+      offline: ["Not connected", "Can't reach the JavaForge server", "If you started JavaForge with start.bat, make sure its black window is still open. On your website, check your internet connection."],
+    };
+
+    async function checkConnection() {
+      if (IS_FILE) {
+        updateConnUI();
+        return conn;
+      }
+      conn = { state: "checking", server: "" };
+      updateConnUI();
+      try {
+        const res = await fetch(`${RUN_ENDPOINT}?health=1`, { cache: "no-store" });
+        const text = await res.text();
+        let data = null;
+        try {
+          data = JSON.parse(text);
+        } catch {}
+        if (data && data.ok === true) conn = { state: data.hasKey ? "ok" : "nokey", server: data.server || "" };
+        else if (/<\?php/.test(text)) conn = { state: "nophp", server: "" };
+        else conn = { state: "missing", server: "" };
+      } catch {
+        conn = { state: "offline", server: "" };
+      }
+      updateConnUI();
+      return conn;
+    }
+
+    function updateConnUI() {
+      const [short, title, msg] = CONN_TEXT[conn.state];
+      for (const pill of document.querySelectorAll(".conn-pill")) {
+        pill.dataset.state = conn.state;
+        $(".txt", pill).textContent = short;
+        pill.title = title || (conn.state === "ok" ? `Running code through ${conn.server === "php" ? "run.php" : "the local JavaForge server"}` : "");
+      }
+      const showBanner = !["ok", "checking"].includes(conn.state);
+      $("#connBanner").hidden = !showBanner;
+      if (showBanner) {
+        $("#connBannerTitle").textContent = title;
+        $("#connBannerMsg").textContent = msg;
+      }
+      $("#bannerRecheck").hidden = IS_FILE;
+      $("#recheckBtn").hidden = IS_FILE;
+      $("#connHint").textContent =
+        conn.state === "ok"
+          ? conn.server === "php"
+            ? "Code is sent to run.php on this website, which adds your API key from secret.php. The key never reaches the browser."
+            : "Code is sent to the local JavaForge server (start.bat), which adds your API key from secret.php."
+          : msg;
     }
 
     function recordRun(ok) {
@@ -1606,18 +1665,21 @@ if (typeof document !== "undefined") {
       if (!code.trim()) return toast("Write some code first", "error");
       saveNow(false);
 
-      const key = apiKey();
-      if (!key) {
-        toast("Add your OnlineCompiler.io API key in Settings to run code.", "error", 4000);
-        openSettings(true);
-        return;
-      }
-
       const p = getProgram(currentId);
       const prep = JavaPrep.prepare(code);
       const consoleEl = $("#console");
       if (settings.clearOnRun || consoleEl.querySelector(".console-placeholder")) consoleEl.replaceChildren();
       clearErrorMarks();
+
+      if (conn.state !== "ok" && !IS_FILE) await checkConnection();
+      if (conn.state !== "ok") {
+        const [, title, msg] = CONN_TEXT[conn.state];
+        const entry = el("div", { class: "console-entry" }, el("div", { class: "entry-head" }, el("span", { class: "badge err" }, "Can't run"), new Date().toLocaleTimeString()));
+        entry.append(el("div", { class: "err-block" }, el("span", { class: "err-title" }, title), msg));
+        consoleEl.append(entry);
+        setRunStatus("err", "Not connected");
+        return;
+      }
 
       if (prep.error) {
         const entry = el("div", { class: "console-entry" }, el("div", { class: "entry-head" }, el("span", { class: "badge err" }, "Can't run"), new Date().toLocaleTimeString()));
@@ -1649,10 +1711,10 @@ if (typeof document !== "undefined") {
       let failure = null;
 
       try {
-        const res = await fetch(API_URL, {
+        const res = await fetch(RUN_ENDPOINT, {
           method: "POST",
-          headers: { Authorization: key, "Content-Type": "application/json" },
-          body: JSON.stringify({ compiler: COMPILER_ID, code: prep.code, input: $("#stdinInput").value }),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: prep.code, input: $("#stdinInput").value }),
           signal: ctrl.signal,
         });
         const text = await res.text();
@@ -1663,22 +1725,25 @@ if (typeof document !== "undefined") {
         }
         if (!res.ok) {
           const detail = typeof raw === "object" && raw ? raw.detail || raw.error || raw.message || JSON.stringify(raw) : String(raw || "").slice(0, 300);
-          if (res.status === 401 || res.status === 403) failure = { title: "API key rejected", msg: `The server said: ${detail}\n\nCheck your API key in Settings.` };
-          else if (res.status === 429) failure = { title: "Rate limit reached", msg: `Too many runs right now or monthly limit reached.\n${detail}` };
-          else failure = { title: `Server error (${res.status})`, msg: String(detail) };
+          if (res.status === 401) failure = { title: "API key rejected", msg: `OnlineCompiler.io said: ${detail}\n\nCheck the key in secret.php.` };
+          else if (res.status === 403) failure = { title: "Request refused", msg: `${detail}\n\nIf this mentions the key, check the key in secret.php.` };
+          else if (res.status === 429) failure = { title: "Too many runs", msg: `${detail}\n\nWait a minute and try again. (OnlineCompiler.io's monthly limit may also have been reached.)` };
+          else if (res.status === 404) {
+            failure = { title: "run.php not found", msg: CONN_TEXT.missing[2] };
+            conn.state = "missing";
+            updateConnUI();
+          } else failure = { title: `Server error (${res.status})`, msg: String(detail) };
         } else {
           result = ResultParser.normalize(raw, prep.launcher);
         }
       } catch (err) {
         if (err.name === "AbortError") failure = { title: "Timed out", msg: `No response from the compiler after ${RUN_TIMEOUT_MS / 1000} seconds. Your program may have an infinite loop, or the server is busy. Try again.` };
         else
-          failure = {
-            title: "Couldn't reach the compiler",
-            msg:
-              "The request to OnlineCompiler.io failed. Check your internet connection and try again.\n" +
-              (location.protocol === "file:" ? "Tip: if it keeps failing, serve the folder with a local web server (see README) instead of opening the file directly.\n" : "") +
-              `(${err.message})`,
-          };
+        {
+          conn.state = "offline";
+          updateConnUI();
+          failure = { title: CONN_TEXT.offline[1], msg: `${CONN_TEXT.offline[2]}\n(${err.message})` };
+        }
       } finally {
         clearTimeout(timer);
       }
@@ -1779,27 +1844,18 @@ if (typeof document !== "undefined") {
     }
 
     /* ---------- Settings dialog ---------- */
-    function openSettings(focusKey = false) {
+    function openSettings() {
       const dlg = $("#settingsDialog");
-      const cfgKey = window.JAVAFORGE_CONFIG && window.JAVAFORGE_CONFIG.apiKey && !/PASTE-YOUR/i.test(window.JAVAFORGE_CONFIG.apiKey);
-      $("#apiKeyInput").value = settings.apiKey || "";
-      $("#apiKeyInput").placeholder = cfgKey ? "Using key from config.js (paste here to override)" : "Paste your API key";
-      $("#apiKeyHint").textContent = cfgKey
-        ? "A key is loaded from config.js. Anything you paste here overrides it and is stored only in this browser."
-        : "The key is stored only in this browser (LocalStorage). Get one free at onlinecompiler.io.";
-      $("#apiKeyInput").type = "password";
-      $("#toggleKeyBtn").textContent = "Show";
+      updateConnUI();
       $("#setAutosave").checked = settings.autosave;
       $("#setMinimap").checked = settings.minimap;
       $("#setWrap").checked = settings.wordWrap;
       $("#setClearOnRun").checked = settings.clearOnRun;
       dlg.returnValue = "";
       dlg.showModal();
-      if (focusKey) $("#apiKeyInput").focus();
     }
     $("#settingsDialog").addEventListener("close", () => {
       if ($("#settingsDialog").returnValue !== "ok") return;
-      settings.apiKey = $("#apiKeyInput").value.trim();
       settings.autosave = $("#setAutosave").checked;
       settings.clearOnRun = $("#setClearOnRun").checked;
       saveSettings();
@@ -1807,10 +1863,10 @@ if (typeof document !== "undefined") {
       setWordWrap($("#setWrap").checked);
       toast("Settings saved", "success");
     });
-    $("#toggleKeyBtn").addEventListener("click", () => {
-      const inp = $("#apiKeyInput");
-      inp.type = inp.type === "password" ? "text" : "password";
-      $("#toggleKeyBtn").textContent = inp.type === "password" ? "Show" : "Hide";
+    $("#recheckBtn").addEventListener("click", checkConnection);
+    $("#bannerRecheck").addEventListener("click", async () => {
+      const c = await checkConnection();
+      if (c.state === "ok") toast("Connected — you can run code now", "success");
     });
 
     /* ---------- Splitter (resize side panel) ---------- */
@@ -1986,6 +2042,7 @@ if (typeof document !== "undefined") {
     window.addEventListener("resize", debounce(() => setSidebarWidth(settings.sidebarWidth), 150));
     renderTemplates();
     route();
+    checkConnection();
     // Start loading Monaco in the background so the editor opens instantly.
     loadMonaco().catch(() => {});
   })();

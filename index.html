@@ -11,9 +11,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
-  <!-- Optional local config with your API key (kept out of git). The app still works without it:
-       you can paste the key in Settings instead. -->
-  <script src="config.js" onerror="void 0"></script>
 </head>
 <body>
   <!-- ================= HEADER ================= -->
@@ -83,6 +80,15 @@
   <!-- ================= DASHBOARD ================= -->
   <main id="dashboardView" class="view dashboard-view">
     <div class="dash-inner">
+      <div class="notice" id="connBanner" role="alert" hidden>
+        <div class="notice-icon" aria-hidden="true">!</div>
+        <div class="notice-body">
+          <strong id="connBannerTitle"></strong>
+          <p id="connBannerMsg"></p>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="bannerRecheck" type="button">Check again</button>
+      </div>
+
       <section class="hero">
         <div class="hero-text">
           <h1>Your Java workspace</h1>
@@ -215,6 +221,8 @@
       <span id="cursorPos">Ln 1, Col 1</span>
       <span class="sep">·</span>
       <span>Java · OpenJDK 25</span>
+      <span class="sep">·</span>
+      <span class="conn-pill" data-state="checking"><span class="dot"></span><span class="txt">Checking…</span></span>
       <span class="spacer"></span>
       <span class="hide-sm muted"><kbd>Ctrl</kbd>+<kbd>S</kbd> save · <kbd>Ctrl</kbd>+<kbd>↵</kbd> run</span>
       <span class="sep hide-sm">·</span>
@@ -250,14 +258,14 @@
     <form method="dialog" class="modal-body" id="settingsForm">
       <h3>Settings</h3>
 
-      <label class="field">
-        <span class="field-label">OnlineCompiler.io API key</span>
+      <div class="field">
+        <span class="field-label">Compiler connection</span>
         <div class="key-row">
-          <input id="apiKeyInput" class="text-input mono" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your API key" />
-          <button type="button" class="btn btn-ghost btn-sm" id="toggleKeyBtn">Show</button>
+          <span class="conn-pill" data-state="checking"><span class="dot"></span><span class="txt">Checking…</span></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="recheckBtn">Check again</button>
         </div>
-        <span class="field-hint muted" id="apiKeyHint">The key is stored only in this browser (LocalStorage).</span>
-      </label>
+        <span class="field-hint muted" id="connHint"></span>
+      </div>
 
       <div class="settings-grid">
         <label class="toggle-row"><input type="checkbox" id="setAutosave" /> <span>Auto-save while typing</span></label>
@@ -267,7 +275,7 @@
       </div>
 
       <div class="settings-note muted">
-        <strong>Privacy:</strong> your programs are saved in this browser only. When you press Run, the code and input are sent to OnlineCompiler.io to be compiled and executed.
+        <strong>Privacy:</strong> your programs are saved in this browser only. When you press Run, the code and input are sent (through run.php or the local server) to OnlineCompiler.io to be compiled and executed. Your API key lives in secret.php and is never sent to the browser.
       </div>
 
       <div class="modal-actions">

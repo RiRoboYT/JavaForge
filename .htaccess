@@ -1,0 +1,9 @@
+# JavaForge — Apache / LiteSpeed (Hostinger) rules
+
+# Don't list the folder's files
+Options -Indexes
+
+# Never serve the key file or the local-only helper files
+<FilesMatch "^(secret\.php|secret\.example\.php|server\.py|JavaForgeServer\.java|start\.bat|config\.js)$">
+  Require all denied
+</FilesMatch>

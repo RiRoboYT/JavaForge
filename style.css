@@ -842,6 +842,43 @@ body.resizing .editor { pointer-events: none; }
 .jf-error-line { background: var(--danger-soft); }
 .jf-error-glyph { background: var(--danger); border-radius: 50%; margin-left: 6px; width: 8px !important; height: 8px !important; margin-top: 6px; }
 
+/* ---------- Connection status ---------- */
+.conn-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.conn-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+.conn-pill[data-state="ok"] .dot { background: var(--success); }
+.conn-pill[data-state="checking"] .dot { background: var(--accent); animation: pulse 0.8s ease-in-out infinite; }
+.conn-pill[data-state="nokey"] .dot { background: var(--warning); }
+.conn-pill[data-state="file"] .dot,
+.conn-pill[data-state="missing"] .dot,
+.conn-pill[data-state="nophp"] .dot,
+.conn-pill[data-state="offline"] .dot { background: var(--danger); }
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--warning);
+  background: var(--warning-soft);
+  animation: view-in 0.3s var(--ease);
+}
+.notice-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--warning);
+  color: var(--surface);
+  font-weight: 800;
+}
+.notice-body { flex: 1 1 auto; min-width: 0; }
+.notice-body strong { font-size: 14.5px; }
+.notice-body p { margin: 4px 0 0; color: var(--text); font-size: 13.5px; }
+
 /* ---------- Modals ---------- */
 .modal {
   border: 1px solid var(--border);
